@@ -1,106 +1,63 @@
 package io.norberg.streamsummary;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 
 public final class StreamSummary<T> {
-
-  private static final int MIN_ENTRIES = 256;
 
   private final long[] counts;
   private final long[] errors;
   private final Object[] elements;
-  private final Map<Object, Integer> indices;
 
   private int size = 0;
-
-  private final long[] minCounts = new long[MIN_ENTRIES];
-  private final long[] minErrors = new long[MIN_ENTRIES];
-  private final Object[] minElements = new Object[MIN_ENTRIES];
 
   public StreamSummary(final int entries) {
     this.counts = new long[entries];
     this.errors = new long[entries];
     this.elements = new Object[entries];
-    this.indices = new HashMap<>(entries);
   }
 
   public long inc(final T element) {
-    final Integer index = indices.get(element);
 
-    // If recorded and not the min element, increase counter and promote element.
-    if (index != null) {
-      final long newCount = counts[index] + 1;
-      final int next = index - 1;
-      if (index == 0 || newCount <= counts[next]) {
-        counts[index] = newCount;
-        return newCount;
+    // If tracked element, increase counter and promote element.
+    for (int i = 0; i < size; i++) {
+      if (Objects.equals(element, elements[i])) {
+        final long newCount = counts[i] + 1;
+        final int next = i - 1;
+        if (i == 0 || newCount <= counts[next]) {
+          counts[i] = newCount;
+          return newCount;
+        }
+        demote(next);
+        return promote(element, newCount, next, errors[i]);
       }
-      demote(next);
-      return promote(element, newCount, next, errors[index]);
     }
 
     // If new element and the list of counters is not full, append counter and element at end.
     if (size < elements.length) {
-      indices.put(element, size);
       elements[size] = element;
       counts[size] = 1;
       size++;
       return 1;
     }
 
-    // If new element and the set of counters is full, add this element to the min set.
-    final int tail = counts.length - 1;
-    long minCount = Long.MAX_VALUE;
-    int minMin = -1;
-    for (int i = 0; i < minElements.length; i++) {
-      if (element.equals(minElements[i])) {
-        final long newCount = minCounts[i] + 1;
-        // If new min count is not greater then the next count, store and return the new min count.
-        if (newCount <= counts[tail]) {
-          minCounts[i] = newCount;
-          return newCount;
-        }
+    final int tail = elements.length - 1;
+    final int next = tail - 1;
 
-        // New min count is greater than the tail count, demote the tail element to min and
-        // promote the old min element.
-        final long error = minErrors[i];
-        minCounts[i] = counts[tail];
-        minErrors[i] = errors[tail];
-        Object tailElement = elements[tail];
-        minElements[i] = tailElement;
-        indices.remove(tailElement);
-        return promote(element, newCount, tail, error);
-      }
+    // New element, replace the min element.
+    elements[tail] = element;
+    errors[tail] = counts[tail];
+    final long newCount = counts[tail] + 1;
 
-      if (minCounts[i] < minCount) {
-        minCount = minCounts[i];
-        minMin = i;
-      }
-    }
-
-    // Element not found in min set either, replace the min-min.
-    minElements[minMin] = element;
-    minErrors[minMin] = minCounts[minMin];
-    final long newCount = minCounts[minMin] + 1;
-
-    // If new min count is not greater then the next count, store and return the new min count.
-    if (newCount <= counts[tail]) {
-      minCounts[minMin] = newCount;
+    // If new count is not greater then the next count, store and return the new count.
+    if (newCount <= counts[next]) {
+      counts[tail] = newCount;
       return newCount;
     }
 
-    // New min count is greater than the tail count, demote the tail element to min and
-    // promote the old min element.
-    final long error = minErrors[minMin];
-    minCounts[minMin] = counts[tail];
-    minErrors[minMin] = errors[tail];
-    Object tailElement = elements[tail];
-    minElements[minMin] = tailElement;
-    indices.remove(tailElement);
-    return promote(element, newCount, tail, error);
+    // New count is greater than the next count, promote the element.
+    return promote(element, newCount, tail, errors[tail]);
   }
 
   private long promote(final T element, final long count, final int index, final long error) {
@@ -113,7 +70,6 @@ public final class StreamSummary<T> {
     elements[newIndex] = element;
     counts[newIndex] = count;
     errors[newIndex] = error;
-    indices.put(element, newIndex);
     return count;
   }
 
@@ -123,7 +79,6 @@ public final class StreamSummary<T> {
     elements[newIndex] = element;
     counts[newIndex] = counts[index];
     errors[newIndex] = errors[index];
-    indices.put(element, newIndex);
   }
 
   @SuppressWarnings("unchecked")
