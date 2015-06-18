@@ -5,6 +5,9 @@ import org.junit.Test;
 
 import java.util.BitSet;
 
+import static io.norberg.streamsummary.StreamSummary.element;
+import static java.util.Arrays.asList;
+import static java.util.stream.Collectors.toList;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertThat;
 
@@ -14,34 +17,22 @@ public class StreamSummaryTest {
   @Test
   public void testSmallCount() {
     final StreamSummary<String> sut = new StreamSummary<>(5);
-    assertThat(sut.inc("a"), is(1L));
-    assertThat(sut.inc("a"), is(2L));
-    assertThat(sut.inc("b"), is(1L));
-    assertThat(sut.inc("c"), is(1L));
+    assertThat(sut.record("a"), is(1L));
+    assertThat(sut.record("a"), is(2L));
+    assertThat(sut.record("b"), is(1L));
+    assertThat(sut.record("c"), is(1L));
 
-    assertThat(sut.element(0), is("a"));
-    assertThat(sut.count(0), is(2L));
+    assertThat(sut.elements().stream().collect(toList()),
+               is(asList(element("a", 2L), element("b", 1L), element("c", 1L))));
 
-    assertThat(sut.element(1), is("b"));
-    assertThat(sut.count(1), is(1L));
+    assertThat(sut.record("a"), is(3L));
 
-    assertThat(sut.element(2), is("c"));
-    assertThat(sut.count(2), is(1L));
+    assertThat(sut.record("c"), is(2L));
+    assertThat(sut.record("c"), is(3L));
+    assertThat(sut.record("c"), is(4L));
 
-    assertThat(sut.inc("a"), is(3L));
-
-    assertThat(sut.inc("c"), is(2L));
-    assertThat(sut.inc("c"), is(3L));
-    assertThat(sut.inc("c"), is(4L));
-
-    assertThat(sut.element(0), is("c"));
-    assertThat(sut.count(0), is(4L));
-
-    assertThat(sut.element(1), is("a"));
-    assertThat(sut.count(1), is(3L));
-
-    assertThat(sut.element(2), is("b"));
-    assertThat(sut.count(2), is(1L));
+    assertThat(sut.elements().stream().collect(toList()),
+               is(asList(element("c", 4L), element("a", 3L), element("b", 1L))));
   }
 
   @Test
@@ -65,12 +56,12 @@ public class StreamSummaryTest {
     for (int i = 0; i < n; i++) {
       final int element = (int) distribution.sample();
       elements.set(element);
-      sut.inc(element);
+      sut.record(element);
     }
 
     System.out.println("cardinality: " + elements.cardinality());
 
-    sut.table().stream().limit(10).forEach(System.out::println);
+    sut.elements().stream().limit(10).forEach(System.out::println);
   }
 
 }

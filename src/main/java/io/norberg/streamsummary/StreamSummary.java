@@ -1,35 +1,128 @@
 package io.norberg.streamsummary;
 
-import java.util.ArrayList;
+import java.util.AbstractSequentialList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.ListIterator;
 import java.util.Map;
+
+import static java.util.Objects.requireNonNull;
 
 public final class StreamSummary<T> {
 
+  public static final class Element<T> {
+
+    private T value;
+    private long count;
+    private long error;
+
+    private Element(final T value, final long count, final long error) {
+      this.value = requireNonNull(value, "value");
+      this.count = count;
+      this.error = error;
+    }
+
+    private Element(final T value) {
+      this(value, 1, 0);
+    }
+
+    public T value() {
+      return value;
+    }
+
+    public long count() {
+      return count;
+    }
+
+    public long error() {
+      return error;
+    }
+
+    public static <T> Element<T> of(final T value, final long count, final long error) {
+      return new Element<T>(value, count, error);
+    }
+
+    public static <T> Element<T> of(final T value, final long count) {
+      return new Element<T>(value, count, 0);
+    }
+
+    @Override
+    public boolean equals(final Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (o == null || getClass() != o.getClass()) {
+        return false;
+      }
+
+      final Element<?> element = (Element<?>) o;
+
+      if (count != element.count) {
+        return false;
+      }
+      if (error != element.error) {
+        return false;
+      }
+      return !(value != null ? !value.equals(element.value) : element.value != null);
+
+    }
+
+    @Override
+    public int hashCode() {
+      int result = value != null ? value.hashCode() : 0;
+      result = 31 * result + (int) (count ^ (count >>> 32));
+      result = 31 * result + (int) (error ^ (error >>> 32));
+      return result;
+    }
+
+    @Override
+    public String toString() {
+      return "Element{" +
+             "value=" + value +
+             ", count=" + count +
+             ", error=" + error +
+             '}';
+    }
+  }
 
   private static final class Counter<T> {
 
-    private T element;
+    private T value;
     private long count;
     private long error;
     private Counter<T> prev;
     private Counter<T> next;
 
-    public Counter(final T element, final long count, final long error) {
-      this.element = element;
+    public Counter(final T value, final long count, final long error) {
+      this.value = requireNonNull(value, "value");
       this.count = count;
       this.error = error;
     }
 
-    public Counter(final T element) {
-      this(element, 1, 0);
+    public Counter(final T value) {
+      this(value, 1, 0);
     }
 
     @Override
     public String toString() {
-      return "Counter(" + element + ", " + count + ", " + error + ")";
+      return "Counter{" +
+             "value=" + value +
+             ", count=" + count +
+             ", error=" + error +
+             '}';
     }
+
+    public Element<T> element() {
+      return Element.of(value, count, error);
+    }
+  }
+
+  public static <T> Element<T> element(final T value, final long count, final long error) {
+    return Element.of(value, count, error);
+  }
+
+  public static <T> Element<T> element(final T value, final long count) {
+    return Element.of(value, count, 0);
   }
 
   private final int capacity;
@@ -46,7 +139,7 @@ public final class StreamSummary<T> {
     this.counters = new HashMap<>(entries);
   }
 
-  public long inc(final T element) {
+  public long record(final T element) {
 
     // If tracked element, increase counter and promote element.
     Counter<T> counter = counters.get(element);
@@ -76,9 +169,9 @@ public final class StreamSummary<T> {
 
     // New element, replace the min counter.
     counter = head;
-    counters.remove(counter.element);
+    counters.remove(counter.value);
     counters.put(element, counter);
-    counter.element = element;
+    counter.value = element;
     counter.error = counter.count;
     counter.count++;
 
@@ -90,77 +183,129 @@ public final class StreamSummary<T> {
     return counter.count;
   }
 
-  private void insert(final Counter<T> counter, Counter<T> prev) {
+  private void insert(final Counter<T> element, Counter<T> prev) {
     Counter<T> next = prev;
-    while (prev != null && counter.count > prev.count) {
+    while (prev != null && element.count > prev.count) {
       next = prev;
       prev = prev.prev;
     }
-    counter.prev = prev;
-    counter.next = next;
-    next.prev = counter;
+    element.prev = prev;
+    element.next = next;
+    next.prev = element;
     if (prev == null) {
-      head = counter;
+      head = element;
     } else {
-      prev.next = counter;
+      prev.next = element;
     }
   }
 
-  private void remove(final Counter<T> counter) {
-    if (counter == head) {
-      head = counter.next;
+  private void remove(final Counter<T> element) {
+    if (element == head) {
+      head = element.next;
     } else {
-      counter.prev.next = counter.next;
+      element.prev.next = element.next;
     }
-    if (counter == tail) {
-      tail = counter.prev;
+    if (element == tail) {
+      tail = element.prev;
     } else {
-      counter.next.prev = counter.prev;
+      element.next.prev = element.prev;
     }
   }
 
-  public T element(final int i) {
-    return counter(i).element;
+  public List<Element<T>> top(final int i) {
+    return new TopList(i);
   }
 
-  public long count(final int i) {
-    return counter(i).count;
-  }
-
-  public long error(final int i) {
-    return counter(i).error;
-  }
-
-  private Counter<T> counter(final int i) {
-    if (i < 0 || i >= size) {
-      throw new IndexOutOfBoundsException();
-    }
-    Counter<T> counter = head;
-    for (int j = 0; j < i; j++) {
-      counter = counter.next;
-    }
-    return counter;
+  public List<Element<T>> elements() {
+    return new TopList(size);
   }
 
   public int size() {
     return size;
   }
 
-  public List<String> table() {
-    final List<String> table = new ArrayList<>(size());
-    for (int i = 0; i < size; i++) {
-      table.add("#" + i + ": " + element(i) + ": " + count(i) + " (e: " + error(i) + ")");
-    }
-    return table;
-  }
+  private class TopList extends AbstractSequentialList<Element<T>> {
 
-  public int enumerate() {
-    int n = 0;
-    Counter<T> counter = head;
-    while (counter != null) {
-      n++;
-      counter = counter.next;
+    private final int size;
+
+    public TopList(final int size) {
+      if (size > StreamSummary.this.size) {
+        throw new IndexOutOfBoundsException();
+      }
+      this.size = size;
     }
-    return n;
+
+    @Override
+    public ListIterator<Element<T>> listIterator(final int index) {
+      return new Iterator();
+    }
+
+    @Override
+    public int size() {
+      return size;
+    }
+
+    private class Iterator implements ListIterator<Element<T>> {
+
+      Counter<T> next = head;
+      int i;
+
+      @Override
+      public boolean hasNext() {
+        return next != null && i < size();
+      }
+
+      @Override
+      public Element<T> next() {
+        if (!hasNext()) {
+          throw new IllegalStateException();
+        }
+        final Counter<T> next = this.next;
+        this.next = next.next;
+        i++;
+        return next.element();
+      }
+
+      @Override
+      public boolean hasPrevious() {
+        return next.prev != null && i > 0;
+      }
+
+      @Override
+      public Element<T> previous() {
+        if (!hasPrevious()) {
+          throw new IllegalStateException();
+        }
+        final Counter<T> prev = next.prev;
+        this.next = next.prev;
+        i--;
+        return prev.element();
+      }
+
+      @Override
+      public int nextIndex() {
+        return i;
+      }
+
+      @Override
+      public int previousIndex() {
+        return i - 1;
+      }
+
+      @Override
+      public void remove() {
+        throw new UnsupportedOperationException();
+      }
+
+      @Override
+      public void set(final Element<T> element) {
+        throw new UnsupportedOperationException();
+      }
+
+      @Override
+      public void add(final Element<T> element) {
+        throw new UnsupportedOperationException();
+      }
+    }
   }
 }
