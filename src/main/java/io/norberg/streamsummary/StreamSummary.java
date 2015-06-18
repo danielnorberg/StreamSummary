@@ -1,107 +1,145 @@
 package io.norberg.streamsummary;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Objects;
+import java.util.Map;
 
 public final class StreamSummary<T> {
 
-  private final long[] counts;
-  private final long[] errors;
-  private final Object[] elements;
+
+  private static final class Counter<T> {
+
+    private T element;
+    private long count;
+    private long error;
+    private Counter<T> prev;
+    private Counter<T> next;
+
+    public Counter(final T element, final long count, final long error) {
+      this.element = element;
+      this.count = count;
+      this.error = error;
+    }
+
+    public Counter(final T element) {
+      this(element, 1, 0);
+    }
+
+    @Override
+    public String toString() {
+      return "Counter(" + element + ", " + count + ", " + error + ")";
+    }
+  }
+
+  private final int capacity;
+
+  private Counter<T> head;
+  private Counter<T> tail;
+
+  private final Map<T, Counter<T>> counters;
 
   private int size = 0;
 
   public StreamSummary(final int entries) {
-    this.counts = new long[entries];
-    this.errors = new long[entries];
-    this.elements = new Object[entries];
+    this.capacity = entries;
+    this.counters = new HashMap<>(entries);
   }
 
   public long inc(final T element) {
 
     // If tracked element, increase counter and promote element.
-    for (int i = 0; i < size; i++) {
-      if (Objects.equals(element, elements[i])) {
-        final long newCount = counts[i] + 1;
-        final int next = i - 1;
-        if (i == 0 || newCount <= counts[next]) {
-          counts[i] = newCount;
-          return newCount;
-        }
-        demote(next);
-        return promote(element, newCount, next, errors[i]);
+    Counter<T> counter = counters.get(element);
+    if (counter != null) {
+      counter.count++;
+      if (counter.prev != null && counter.count > counter.prev.count) {
+        remove(counter);
+        insert(counter, counter.prev);
       }
+      return counter.count;
     }
 
     // If new element and the list of counters is not full, append counter and element at end.
-    if (size < elements.length) {
-      elements[size] = element;
-      counts[size] = 1;
+    if (size < capacity) {
+      counter = new Counter<>(element);
+      if (head == null) {
+        head = counter;
+      } else {
+        tail.next = counter;
+        counter.prev = tail;
+      }
+      tail = counter;
+      counters.put(element, counter);
       size++;
       return 1;
     }
 
-    final int tail = elements.length - 1;
-    final int next = tail - 1;
+    // New element, replace the min counter.
+    counter = head;
+    counters.remove(counter.element);
+    counters.put(element, counter);
+    counter.element = element;
+    counter.error = counter.count;
+    counter.count++;
 
-    // New element, replace the min element.
-    elements[tail] = element;
-    errors[tail] = counts[tail];
-    final long newCount = counts[tail] + 1;
-
-    // If new count is not greater then the next count, store and return the new count.
-    if (newCount <= counts[next]) {
-      counts[tail] = newCount;
-      return newCount;
+    if (counter.prev != null && counter.count > counter.prev.count) {
+      remove(counter);
+      insert(counter, counter.prev);
     }
 
-    // New count is greater than the next count, promote the element.
-    return promote(element, newCount, tail, errors[tail]);
+    return counter.count;
   }
 
-  private long promote(final T element, final long count, final int index, final long error) {
-    int newIndex = index;
-    int nextIndex;
-    while (newIndex > 0 && count > counts[nextIndex = newIndex - 1]) {
-      demote(nextIndex);
-      newIndex = nextIndex;
+  private void insert(final Counter<T> counter, Counter<T> prev) {
+    Counter<T> next = prev;
+    while (prev != null && counter.count > prev.count) {
+      next = prev;
+      prev = prev.prev;
     }
-    elements[newIndex] = element;
-    counts[newIndex] = count;
-    errors[newIndex] = error;
-    return count;
+    counter.prev = prev;
+    counter.next = next;
+    next.prev = counter;
+    if (prev == null) {
+      head = counter;
+    } else {
+      prev.next = counter;
+    }
   }
 
-  private void demote(final int index) {
-    final Object element = elements[index];
-    int newIndex = index + 1;
-    elements[newIndex] = element;
-    counts[newIndex] = counts[index];
-    errors[newIndex] = errors[index];
+  private void remove(final Counter<T> counter) {
+    if (counter == head) {
+      head = counter.next;
+    } else {
+      counter.prev.next = counter.next;
+    }
+    if (counter == tail) {
+      tail = counter.prev;
+    } else {
+      counter.next.prev = counter.prev;
+    }
   }
 
-  @SuppressWarnings("unchecked")
   public T element(final int i) {
-    if (i < 0 || i >= size) {
-      throw new IndexOutOfBoundsException();
-    }
-    return (T) elements[i];
+    return counter(i).element;
   }
-
 
   public long count(final int i) {
-    if (i < 0 || i >= size) {
-      throw new IndexOutOfBoundsException();
-    }
-    return counts[i];
+    return counter(i).count;
   }
 
   public long error(final int i) {
+    return counter(i).error;
+  }
+
+  private Counter<T> counter(final int i) {
     if (i < 0 || i >= size) {
       throw new IndexOutOfBoundsException();
     }
-    return errors[i];
+    Counter<T> counter = head;
+    for (int j = 0; j < i; j++) {
+      counter = counter.next;
+    }
+    return counter;
   }
 
   public int size() {
@@ -114,5 +152,15 @@ public final class StreamSummary<T> {
       table.add("#" + i + ": " + element(i) + ": " + count(i) + " (e: " + error(i) + ")");
     }
     return table;
+  }
+
+  public int enumerate() {
+    int n = 0;
+    Counter<T> counter = head;
+    while (counter != null) {
+      n++;
+      counter = counter.next;
+    }
+    return n;
   }
 }
