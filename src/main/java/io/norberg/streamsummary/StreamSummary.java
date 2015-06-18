@@ -8,6 +8,13 @@ import java.util.Map;
 
 import static java.util.Objects.requireNonNull;
 
+/**
+ * An implementation of the StreamSummary algorithm described in <i>Efficient Computation of
+ * Frequent and Top-k Elements in Data Streams</i> by Metwally, Agrawal and Abbadi.
+ *
+ * <a href="https://icmi.cs.ucsb.edu/research/tech_reports/reports/2005-23.pdf">
+ * https://icmi.cs.ucsb.edu/research/tech_reports/reports/2005-23.pdf</a>
+ */
 public final class StreamSummary<T> {
 
   public static final class Element<T> {
