@@ -7,6 +7,8 @@ import java.util.Map;
 
 public final class StreamSummary<T> {
 
+  private static final int MIN_ENTRIES = 256;
+
   private final long[] counts;
   private final long[] errors;
   private final Object[] elements;
@@ -14,15 +16,15 @@ public final class StreamSummary<T> {
 
   private int size = 0;
 
-  private long minCount;
-  private long minError;
-  private Object minElement;
+  private final long[] minCounts = new long[MIN_ENTRIES];
+  private final long[] minErrors = new long[MIN_ENTRIES];
+  private final Object[] minElements = new Object[MIN_ENTRIES];
 
   public StreamSummary(final int entries) {
-    this.counts = new long[entries - 1];
-    this.errors = new long[entries - 1];
-    this.elements = new Object[entries - 1];
-    this.indices = new HashMap<>(entries - 1);
+    this.counts = new long[entries];
+    this.errors = new long[entries];
+    this.elements = new Object[entries];
+    this.indices = new HashMap<>(entries);
   }
 
   public long inc(final T element) {
@@ -49,37 +51,56 @@ public final class StreamSummary<T> {
       return 1;
     }
 
-    // If new element, the set of counters is full but there is no min element, make this element
-    // the min element.
-    if (minElement == null) {
-      minElement = element;
-      minCount = 1;
-      size++;
-      return 1;
+    // If new element and the set of counters is full, add this element to the min set.
+    final int tail = counts.length - 1;
+    long minCount = Long.MAX_VALUE;
+    int minMin = -1;
+    for (int i = 0; i < minElements.length; i++) {
+      if (element.equals(minElements[i])) {
+        final long newCount = minCounts[i] + 1;
+        // If new min count is not greater then the next count, store and return the new min count.
+        if (newCount <= counts[tail]) {
+          minCounts[i] = newCount;
+          return newCount;
+        }
+
+        // New min count is greater than the tail count, demote the tail element to min and
+        // promote the old min element.
+        final long error = minErrors[i];
+        minCounts[i] = counts[tail];
+        minErrors[i] = errors[tail];
+        Object tailElement = elements[tail];
+        minElements[i] = tailElement;
+        indices.remove(tailElement);
+        return promote(element, newCount, tail, error);
+      }
+
+      if (minCounts[i] < minCount) {
+        minCount = minCounts[i];
+        minMin = i;
+      }
     }
 
-    // If new element and the set of counters is full, replace the min element.
-    if (!minElement.equals(element)) {
-      minElement = element;
-      minError = minCount;
-    }
-    final long newCount = minCount + 1;
-    final int next = counts.length - 1;
+    // Element not found in min set either, replace the min-min.
+    minElements[minMin] = element;
+    minErrors[minMin] = minCounts[minMin];
+    final long newCount = minCounts[minMin] + 1;
 
     // If new min count is not greater then the next count, store and return the new min count.
-    if (newCount <= counts[next]) {
-      minCount = newCount;
+    if (newCount <= counts[tail]) {
+      minCounts[minMin] = newCount;
       return newCount;
     }
 
-    // New min count is greater than the next count, demote the next-to-min element to min and
+    // New min count is greater than the tail count, demote the tail element to min and
     // promote the old min element.
-    final long error = minError;
-    minCount = counts[next];
-    minError = errors[next];
-    minElement = elements[next];
-    indices.remove(minElement);
-    return promote(element, newCount, next, error);
+    final long error = minErrors[minMin];
+    minCounts[minMin] = counts[tail];
+    minErrors[minMin] = errors[tail];
+    Object tailElement = elements[tail];
+    minElements[minMin] = tailElement;
+    indices.remove(tailElement);
+    return promote(element, newCount, tail, error);
   }
 
   private long promote(final T element, final long count, final int index, final long error) {
@@ -110,9 +131,6 @@ public final class StreamSummary<T> {
     if (i < 0 || i >= size) {
       throw new IndexOutOfBoundsException();
     }
-    if (i == elements.length) {
-      return (T) minElement;
-    }
     return (T) elements[i];
   }
 
@@ -121,18 +139,12 @@ public final class StreamSummary<T> {
     if (i < 0 || i >= size) {
       throw new IndexOutOfBoundsException();
     }
-    if (i == elements.length) {
-      return minCount;
-    }
     return counts[i];
   }
 
   public long error(final int i) {
     if (i < 0 || i >= size) {
       throw new IndexOutOfBoundsException();
-    }
-    if (i == elements.length) {
-      return minError;
     }
     return errors[i];
   }

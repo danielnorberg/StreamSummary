@@ -45,16 +45,21 @@ public class StreamSummaryTest {
   }
 
   @Test
-  public void testLargeCount() {
+  public void testPareto_50_0p5_200M() {
     final BitSet elements = new BitSet();
-    final ParetoDistribution distribution = new ParetoDistribution(1000, 3);
+    final ParetoDistribution distribution = new ParetoDistribution(50, 0.5);
 
-    final int n = 100000000;
-    final double topEstimate = distribution.cumulativeProbability(1001) * n;
+    final int n = 200000000;
+
+    final double topEstimate = distribution.cumulativeProbability(distribution.getScale() + 1) * n;
+    final double nr200Estimate =
+        (distribution.cumulativeProbability(distribution.getScale() + 201) -
+         distribution.cumulativeProbability(distribution.getScale() + 200)) * n;
     final int entries = (int) (2 * n / topEstimate);
     final StreamSummary<Integer> sut = new StreamSummary<>(entries);
 
     System.out.println("top estimate: " + (int) topEstimate);
+    System.out.println("#200 estimate: " + (int) nr200Estimate);
     System.out.println("stream summary entries: " + entries);
 
     for (int i = 0; i < n; i++) {
