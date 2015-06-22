@@ -175,7 +175,7 @@ public final class StreamSummary<T> {
     }
 
     // New element, replace the min counter.
-    counter = head;
+    counter = tail;
     counters.remove(counter.value);
     counters.put(element, counter);
     counter.value = element;
