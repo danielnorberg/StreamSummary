@@ -315,4 +315,62 @@ public final class StreamSummary<T> {
       }
     }
   }
+
+  public static <T> Builder<T> builder() {
+    return new Builder<>();
+  }
+
+  public static final class Builder<T> {
+
+    private Distribution distribution;
+    private long observations;
+    private int k;
+    private Long estimate;
+
+    private Builder() {
+    }
+
+    public Builder<T> paretoDistribution(final double scale, final double shape) {
+      return distribution(ParetoDistribution.of(scale, shape));
+    }
+
+    public Builder<T> distribution(final Distribution distribution) {
+      this.distribution = requireNonNull(distribution, "distribution");
+      return this;
+    }
+
+    public Builder<T> observations(final long n) {
+      this.observations = n;
+      return this;
+    }
+
+    public Builder<T> top(final int k) {
+      this.k = k;
+      this.estimate = null;
+      return this;
+    }
+
+    public Builder<T> top(final int k, final long estimate) {
+      this.k = k;
+      this.estimate = estimate;
+      return this;
+    }
+
+    public StreamSummary<T> build() {
+      final long estimate;
+      if (this.estimate != null) {
+        estimate = this.estimate;
+      } else {
+        requireNonNull(distribution, "missing either top k observation estimate or distribution");
+        final double probability = distribution.probability(k);
+        estimate = (long) (probability * observations);
+      }
+      if (estimate == 0) {
+        throw new IllegalArgumentException("top k observation estimate is zero");
+      }
+      final int entries = (int) (2 * observations / estimate);
+      return new StreamSummary<>(entries);
+    }
+  }
+
 }
