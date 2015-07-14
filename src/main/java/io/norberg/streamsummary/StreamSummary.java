@@ -1,5 +1,6 @@
 package io.norberg.streamsummary;
 
+import java.io.Serializable;
 import java.util.AbstractSequentialList;
 import java.util.HashMap;
 import java.util.List;
@@ -15,7 +16,240 @@ import static java.util.Objects.requireNonNull;
  * <a href="https://icmi.cs.ucsb.edu/research/tech_reports/reports/2005-23.pdf">
  * https://icmi.cs.ucsb.edu/research/tech_reports/reports/2005-23.pdf</a>
  */
-public final class StreamSummary<T> {
+public final class StreamSummary<T> implements Serializable {
+
+  private static final long serialVersionUID = 0;
+
+  private final int capacity;
+
+  private final Map<T, Counter<T>> counters;
+
+  private Counter<T> head;
+  private Counter<T> tail;
+
+  private long count;
+
+  private int size;
+
+  private StreamSummary(final int entries) {
+    this.capacity = entries;
+    this.counters = new HashMap<>(entries);
+  }
+
+  /**
+   * Record a single observation of an element.
+   */
+  public long record(final T element) {
+    return record(element, 1);
+  }
+
+  /**
+   * Record {@code count} observations of an element.
+   */
+  public long record(final T element, final long count) {
+    return record(element, count, 0);
+  }
+
+  /**
+   * Merge another {@link StreamSummary} into this summary.
+   */
+  public void merge(final StreamSummary<T> other) {
+    for (final Element<T> element : other.elements()) {
+      record(element.value(), element.count(), element.error());
+    }
+  }
+
+  /**
+   * The top {@code i} elements, in descending count order, bounded by the current {@link #size()}.
+   */
+  public List<Element<T>> top(final int i) {
+    return new TopList(i);
+  }
+
+  /**
+   * A list of the top {@link #size()} elements, in descending count order.
+   */
+  public List<Element<T>> elements() {
+    return new TopList(size);
+  }
+
+  /**
+   * The maximum number of top elements tracked by this summary.
+   */
+  public int capacity() {
+    return capacity;
+  }
+
+  /**
+   * The number of top elements in this summary, bounded by {@link #capacity()}.
+   */
+  public int size() {
+    return size;
+  }
+
+  /**
+   * The total element count recorded in this summary.
+   */
+  public long count() {
+    return count;
+  }
+
+  private long record(final T element, final long count, final long error) {
+
+    // Increase total count
+    this.count += count;
+
+    // If tracked element, increase counter and promote element.
+    Counter<T> counter = counters.get(element);
+    if (counter != null) {
+      counter.count += count;
+      counter.error += error;
+      if (counter.prev != null && counter.count > counter.prev.count) {
+        remove(counter);
+        insert(counter, counter.prev);
+      }
+      return counter.count;
+    }
+
+    // If new element and the list of counters is not full, append counter and element at end.
+    if (size < capacity) {
+      counter = new Counter<>(element, count, error);
+      if (head == null) {
+        head = counter;
+      } else {
+        tail.next = counter;
+        counter.prev = tail;
+      }
+      tail = counter;
+      counters.put(element, counter);
+      size++;
+      return counter.count;
+    }
+
+    // New element, replace the min counter.
+    counter = tail;
+    counters.remove(counter.value);
+    counters.put(element, counter);
+    counter.value = element;
+    counter.error = counter.count;
+    counter.count += count;
+    counter.error += error;
+
+    if (counter.prev != null && counter.count > counter.prev.count) {
+      remove(counter);
+      insert(counter, counter.prev);
+    }
+
+    return counter.count;
+  }
+
+  private void insert(final Counter<T> element, Counter<T> prev) {
+    Counter<T> next = prev;
+    while (prev != null && element.count > prev.count) {
+      next = prev;
+      prev = prev.prev;
+    }
+    element.prev = prev;
+    element.next = next;
+    next.prev = element;
+    if (prev == null) {
+      head = element;
+    } else {
+      prev.next = element;
+    }
+  }
+
+  private void remove(final Counter<T> element) {
+    if (element == head) {
+      head = element.next;
+    } else {
+      element.prev.next = element.next;
+    }
+    if (element == tail) {
+      tail = element.prev;
+    } else {
+      element.next.prev = element.prev;
+    }
+  }
+
+  @Override
+  public String toString() {
+    return "StreamSummary{" +
+           "count=" + count +
+           ", elements=" + counters +
+           ", capacity=" + capacity +
+           ", size=" + size +
+           '}';
+  }
+
+  public static <T> Element<T> element(final T value, final long count, final long error) {
+    return Element.of(value, count, error);
+  }
+
+  public static <T> Element<T> element(final T value, final long count) {
+    return Element.of(value, count, 0);
+  }
+
+  public static <T> StreamSummary<T> of(final int entries) {
+    return new StreamSummary<>(entries);
+  }
+
+  public static <T> Builder<T> builder() {
+    return new Builder<>();
+  }
+
+  public static final class Builder<T> {
+
+    private Distribution distribution;
+    private long observations;
+    private int k;
+    private Long estimate;
+
+    private Builder() {
+    }
+
+    public Builder<T> paretoDistribution(final double scale, final double shape) {
+      return distribution(ParetoDistribution.of(scale, shape));
+    }
+
+    public Builder<T> distribution(final Distribution distribution) {
+      this.distribution = requireNonNull(distribution, "distribution");
+      return this;
+    }
+
+    public Builder<T> observations(final long n) {
+      this.observations = n;
+      return this;
+    }
+
+    public Builder<T> top(final int k) {
+      this.k = k;
+      this.estimate = null;
+      return this;
+    }
+
+    public Builder<T> top(final int k, final long estimate) {
+      this.k = k;
+      this.estimate = estimate;
+      return this;
+    }
+
+    public StreamSummary<T> build() {
+      final long estimate;
+      if (this.estimate != null) {
+        estimate = this.estimate;
+      } else {
+        requireNonNull(distribution, "missing either top k observation estimate or distribution");
+        final double probability = distribution.probability(k);
+        estimate = (long) (probability * observations);
+      }
+      if (estimate == 0) {
+        throw new IllegalArgumentException("top k observation estimate is zero");
+      }
+      final int entries = (int) (2 * observations / estimate);
+      return StreamSummary.of(entries);
+    }
+  }
 
   public static final class Element<T> {
 
@@ -92,7 +326,9 @@ public final class StreamSummary<T> {
     }
   }
 
-  private static final class Counter<T> {
+  private static final class Counter<T> implements Serializable {
+
+    private static final long serialVersionUID = 0;
 
     private T value;
     private long count;
@@ -100,14 +336,10 @@ public final class StreamSummary<T> {
     private Counter<T> prev;
     private Counter<T> next;
 
-    public Counter(final T value, final long count, final long error) {
+    private Counter(final T value, final long count, final long error) {
       this.value = requireNonNull(value, "value");
       this.count = count;
       this.error = error;
-    }
-
-    public Counter(final T value) {
-      this(value, 1, 0);
     }
 
     @Override
@@ -119,116 +351,9 @@ public final class StreamSummary<T> {
              '}';
     }
 
-    public Element<T> element() {
+    private Element<T> element() {
       return Element.of(value, count, error);
     }
-  }
-
-  public static <T> Element<T> element(final T value, final long count, final long error) {
-    return Element.of(value, count, error);
-  }
-
-  public static <T> Element<T> element(final T value, final long count) {
-    return Element.of(value, count, 0);
-  }
-
-  private final int capacity;
-
-  private Counter<T> head;
-  private Counter<T> tail;
-
-  private final Map<T, Counter<T>> counters;
-
-  private int size = 0;
-
-  public StreamSummary(final int entries) {
-    this.capacity = entries;
-    this.counters = new HashMap<>(entries);
-  }
-
-  public long record(final T element) {
-
-    // If tracked element, increase counter and promote element.
-    Counter<T> counter = counters.get(element);
-    if (counter != null) {
-      counter.count++;
-      if (counter.prev != null && counter.count > counter.prev.count) {
-        remove(counter);
-        insert(counter, counter.prev);
-      }
-      return counter.count;
-    }
-
-    // If new element and the list of counters is not full, append counter and element at end.
-    if (size < capacity) {
-      counter = new Counter<>(element);
-      if (head == null) {
-        head = counter;
-      } else {
-        tail.next = counter;
-        counter.prev = tail;
-      }
-      tail = counter;
-      counters.put(element, counter);
-      size++;
-      return 1;
-    }
-
-    // New element, replace the min counter.
-    counter = tail;
-    counters.remove(counter.value);
-    counters.put(element, counter);
-    counter.value = element;
-    counter.error = counter.count;
-    counter.count++;
-
-    if (counter.prev != null && counter.count > counter.prev.count) {
-      remove(counter);
-      insert(counter, counter.prev);
-    }
-
-    return counter.count;
-  }
-
-  private void insert(final Counter<T> element, Counter<T> prev) {
-    Counter<T> next = prev;
-    while (prev != null && element.count > prev.count) {
-      next = prev;
-      prev = prev.prev;
-    }
-    element.prev = prev;
-    element.next = next;
-    next.prev = element;
-    if (prev == null) {
-      head = element;
-    } else {
-      prev.next = element;
-    }
-  }
-
-  private void remove(final Counter<T> element) {
-    if (element == head) {
-      head = element.next;
-    } else {
-      element.prev.next = element.next;
-    }
-    if (element == tail) {
-      tail = element.prev;
-    } else {
-      element.next.prev = element.prev;
-    }
-  }
-
-  public List<Element<T>> top(final int i) {
-    return new TopList(i);
-  }
-
-  public List<Element<T>> elements() {
-    return new TopList(size);
-  }
-
-  public int size() {
-    return size;
   }
 
   private class TopList extends AbstractSequentialList<Element<T>> {
@@ -236,10 +361,10 @@ public final class StreamSummary<T> {
     private final int size;
 
     public TopList(final int size) {
-      if (size > StreamSummary.this.size) {
+      if (size > capacity) {
         throw new IndexOutOfBoundsException();
       }
-      this.size = size;
+      this.size = Math.min(StreamSummary.this.size, size);
     }
 
     @Override
@@ -259,7 +384,7 @@ public final class StreamSummary<T> {
 
       @Override
       public boolean hasNext() {
-        return next != null && i < size();
+        return i < size;
       }
 
       @Override
@@ -275,7 +400,7 @@ public final class StreamSummary<T> {
 
       @Override
       public boolean hasPrevious() {
-        return next.prev != null && i > 0;
+        return i > 0;
       }
 
       @Override
@@ -315,62 +440,4 @@ public final class StreamSummary<T> {
       }
     }
   }
-
-  public static <T> Builder<T> builder() {
-    return new Builder<>();
-  }
-
-  public static final class Builder<T> {
-
-    private Distribution distribution;
-    private long observations;
-    private int k;
-    private Long estimate;
-
-    private Builder() {
-    }
-
-    public Builder<T> paretoDistribution(final double scale, final double shape) {
-      return distribution(ParetoDistribution.of(scale, shape));
-    }
-
-    public Builder<T> distribution(final Distribution distribution) {
-      this.distribution = requireNonNull(distribution, "distribution");
-      return this;
-    }
-
-    public Builder<T> observations(final long n) {
-      this.observations = n;
-      return this;
-    }
-
-    public Builder<T> top(final int k) {
-      this.k = k;
-      this.estimate = null;
-      return this;
-    }
-
-    public Builder<T> top(final int k, final long estimate) {
-      this.k = k;
-      this.estimate = estimate;
-      return this;
-    }
-
-    public StreamSummary<T> build() {
-      final long estimate;
-      if (this.estimate != null) {
-        estimate = this.estimate;
-      } else {
-        requireNonNull(distribution, "missing either top k observation estimate or distribution");
-        final double probability = distribution.probability(k);
-        estimate = (long) (probability * observations);
-      }
-      if (estimate == 0) {
-        throw new IllegalArgumentException("top k observation estimate is zero");
-      }
-      final int entries = (int) (2 * observations / estimate);
-      return new StreamSummary<>(entries);
-    }
-  }
-
 }

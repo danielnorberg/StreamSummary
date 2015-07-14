@@ -15,7 +15,7 @@ public class StreamSummaryTest {
 
   @Test
   public void testSmallCount() {
-    final StreamSummary<String> sut = new StreamSummary<>(5);
+    final StreamSummary<String> sut = StreamSummary.of(5);
     assertThat(sut.record("a"), is(1L));
     assertThat(sut.record("a"), is(2L));
     assertThat(sut.record("b"), is(1L));
@@ -51,7 +51,7 @@ public class StreamSummaryTest {
       sut.record(element);
     }
 
-    sut.elements().stream().limit(10).forEach(System.out::println);
+    sut.top(10).forEach(System.out::println);
   }
 
   @Test
@@ -71,7 +71,7 @@ public class StreamSummaryTest {
       sut.record(element);
     }
 
-    sut.elements().stream().limit(10).forEach(System.out::println);
+    sut.top(10).forEach(System.out::println);
   }
 
 }
