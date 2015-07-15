@@ -176,7 +176,7 @@ public final class StreamSummary<T> implements Serializable {
   public String toString() {
     return "StreamSummary{" +
            "count=" + count +
-           ", elements=" + counters +
+           ", elements=" + elements() +
            ", capacity=" + capacity +
            ", size=" + size +
            '}';
