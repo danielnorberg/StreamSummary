@@ -1,5 +1,7 @@
 package io.norberg.streamsummary;
 
+import java.io.IOException;
+import java.io.ObjectInputStream;
 import java.io.Serializable;
 import java.util.AbstractSequentialList;
 import java.util.HashMap;
@@ -22,10 +24,10 @@ public final class StreamSummary<T> implements Serializable {
 
   private final int capacity;
 
-  private final Map<T, Counter<T>> counters;
+  transient private Map<T, Counter<T>> counters;
 
-  private Counter<T> head;
-  private Counter<T> tail;
+  transient private Counter<T> head;
+  transient private Counter<T> tail;
 
   private long count;
 
@@ -440,4 +442,50 @@ public final class StreamSummary<T> implements Serializable {
       }
     }
   }
+
+  private void writeObject(java.io.ObjectOutputStream s)
+      throws java.io.IOException {
+    // Write serialization magic and primitive fields
+    s.defaultWriteObject();
+
+    // Write out all counters in order.
+    for (Counter<T> c = head; c != null; c = c.next) {
+      s.writeObject(c.value);
+      s.writeLong(c.count);
+      s.writeLong(c.error);
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private void readObject(java.io.ObjectInputStream s)
+      throws java.io.IOException, ClassNotFoundException {
+    // Read serialization magic and primitive fields
+    s.defaultReadObject();
+
+    // Read in all counters in order.
+    head = readCounter(s);
+    Counter<T> curr = head;
+    Counter<T> prev;
+    for (int i = 1; i < size; i++) {
+      prev = curr;
+      curr = readCounter(s);
+      prev.next = curr;
+      curr.prev = prev;
+    }
+    tail = curr;
+
+    // Recreate counter map
+    counters = new HashMap<>();
+    for (Counter<T> c = head; c != null; c = c.next) {
+      counters.put(c.value, c);
+    }
+  }
+
+  private Counter<T> readCounter(final ObjectInputStream s) throws IOException, ClassNotFoundException {
+    @SuppressWarnings("unchecked") final T value = (T) s.readObject();
+    final long count = s.readLong();
+    final long error = s.readLong();
+    return new Counter<>(value, count, error);
+  }
+
 }
